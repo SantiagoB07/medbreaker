@@ -1,11 +1,21 @@
 // Re-export types for client-side usage
 export type AgentRole = 'red-agent' | 'green-agent';
 
+/**
+ * Representa una llamada a tool hecha por el agente
+ */
+export interface ToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+  result: unknown;
+}
+
 export interface Message {
   role: AgentRole;
   content: string;
   timestamp: Date;
   turnNumber: number;
+  toolCalls?: ToolCall[];
 }
 
 export interface TacticCounts {

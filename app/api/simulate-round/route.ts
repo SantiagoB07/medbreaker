@@ -6,6 +6,9 @@ import {
 } from '@/scripts/shared';
 import type { SingleRoundEvent, PreviousRoundSummary, RoundContext } from '@/scripts/shared';
 
+// Get Convex URL from environment
+const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL;
+
 /**
  * POST /api/simulate-round
  * 
@@ -134,7 +137,8 @@ export async function POST(request: NextRequest) {
                 });
               }
             },
-            () => isCancelled
+            () => isCancelled,
+            CONVEX_URL // Pass Convex URL to enable tools
           );
 
           if (isCancelled) return;

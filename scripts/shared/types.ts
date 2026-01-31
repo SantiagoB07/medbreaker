@@ -9,6 +9,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   turnNumber: number;
+  toolCalls?: ToolCall[];
 }
 
 export interface ConversationContext {
@@ -17,8 +18,18 @@ export interface ConversationContext {
   maxTurns: number;
 }
 
+/**
+ * Representa una llamada a tool hecha por el agente
+ */
+export interface ToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+  result: unknown;
+}
+
 export interface AgentResponse {
   content: string;
+  toolCalls?: ToolCall[];
   metadata?: {
     manipulationTactic?: 'emotional' | 'legal' | 'technical' | 'mixed' | 'none';
     confidence?: number;

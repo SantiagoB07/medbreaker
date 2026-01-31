@@ -26,6 +26,7 @@ import {
   Search,
   HelpCircle,
   Clock,
+  Database,
 } from 'lucide-react';
 import type { 
   Evaluation, 
@@ -1095,6 +1096,29 @@ export default function Dashboard() {
                 <span className="text-[#9b9a97]">· Turno {msg.turnNumber}</span>
               </div>
               <p className="text-sm text-[#37352f] whitespace-pre-wrap">{msg.content}</p>
+              {/* Tool Calls Display */}
+              {msg.toolCalls && msg.toolCalls.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {msg.toolCalls.map((call, callIdx) => (
+                    <div 
+                      key={callIdx}
+                      className="flex items-start gap-2 text-xs bg-[#f7f6f3] rounded px-2 py-1.5 border border-[#e3e2de]"
+                    >
+                      <Database className="w-3.5 h-3.5 text-[#9065b0] mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="font-mono font-medium text-[#9065b0]">{call.tool}</span>
+                        <span className="text-[#9b9a97] mx-1">→</span>
+                        <span className="text-[#6b6b6b] break-all">
+                          {typeof call.result === 'object' 
+                            ? JSON.stringify(call.result).substring(0, 100) + (JSON.stringify(call.result).length > 100 ? '...' : '')
+                            : String(call.result)
+                          }
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 

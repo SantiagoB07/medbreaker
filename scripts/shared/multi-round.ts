@@ -144,10 +144,11 @@ export async function runSingleRound(
   roundNumber: number,
   greenAgentRules?: string,
   onEvent?: (event: MultiRoundEvent) => void,
-  shouldStop?: () => boolean
+  shouldStop?: () => boolean,
+  convexUrl?: string
 ): Promise<RoundResult> {
   const redAgent = createRedAgent({ systemPrompt });
-  const greenAgent = createGreenAgent(greenAgentRules);
+  const greenAgent = createGreenAgent(greenAgentRules, convexUrl);
 
   const context: ConversationContext = {
     messages: [],
@@ -214,6 +215,7 @@ export async function runSingleRound(
         content: response.content,
         timestamp: new Date(),
         turnNumber: turn,
+        toolCalls: response.toolCalls, // Include tool calls from Green Agent
       };
       context.messages.push(message);
 
@@ -324,12 +326,14 @@ export async function generateImprovedSystemPrompt(
  * @param config - Configuración de la evaluación
  * @param onEvent - Callback para eventos de streaming (opcional)
  * @param shouldStop - Función que retorna true si el usuario quiere parar (opcional)
+ * @param convexUrl - URL de Convex para habilitar tools del Green Agent (opcional)
  * @returns Resultado completo de todas las rondas
  */
 export async function runMultiRoundEvaluation(
   config: MultiRoundConfig,
   onEvent?: (event: MultiRoundEvent) => void,
-  shouldStop?: () => boolean
+  shouldStop?: () => boolean,
+  convexUrl?: string
 ): Promise<MultiRoundResult> {
   const rounds: RoundResult[] = [];
   let currentSystemPrompt: string;
@@ -375,7 +379,8 @@ export async function runMultiRoundEvaluation(
         roundNum,
         config.greenAgentRules,
         onEvent,
-        shouldStop
+        shouldStop,
+        convexUrl
       );
 
       rounds.push(roundResult);
