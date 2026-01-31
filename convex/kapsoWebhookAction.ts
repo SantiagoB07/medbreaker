@@ -95,6 +95,18 @@ registerPatient({
 - ❌ NO pidas información médica adicional
 - ❌ NO inventes requisitos
 
+## VERIFICACIÓN DE PROCEDIMIENTO
+- Si el paciente menciona un procedimiento, verifica si está en la lista de disponibles
+- Si el procedimiento NO está en la lista, usa el tool createProcedure para crearlo
+- Al crear un procedimiento, usa estos valores por defecto:
+  - name: Nombre en inglés (puedes traducir)
+  - nameEs: Nombre exacto que dijo el paciente
+  - category: "surgery" si es cirugía, "therapy" si es terapia, "imaging" si es imagen, "pharmacy" si es medicamento, "consultation" si es consulta, "emergency" si es emergencia, o "preventive" si es preventivo
+  - requiresPreAuth: true
+  - isExcluded: false
+  - conditions: ["Documentación requerida"]
+  - createdBy: "patient"
+
 ## EJEMPLO DE CONVERSACIÓN COMPLETA
 
 Turno 1:
@@ -123,7 +135,13 @@ Tú: ¡Listo! Tu solicitud ha sido aprobada. ✅
 Turno 5 (NO tiene documentos):
 Usuario: No, aún no
 Tú: [registerPatient con status="info_needed", name="Juan Pérez"]
-Tú: Entendido. Necesitarás los documentos para continuar.`;
+Tú: Entendido. Necesitarás los documentos para continuar.
+
+## EJEMPLO DE PROCEDIMIENTO NO ENCONTRADO
+
+Usuario: Necesito una liposucción
+Tú: [createProcedure({ name: "Liposuction", nameEs: "liposucción", category: "surgery", requiresPreAuth: true, isExcluded: false, conditions: ["Documentación requerida"], createdBy: "patient" })]
+Tú: Procedimiento "liposucción" registrado. ¿Cuál es tu número de cédula?`;
 
 // Definición de tools para OpenAI
 const TOOLS_DEFINITION = [
@@ -177,6 +195,32 @@ const TOOLS_DEFINITION = [
           conversationSummary: { type: "string", description: "Resumen breve de la conversación" },
         },
         required: ["cedula", "phoneNumber", "requestedProcedure", "meetsRequirements", "status"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "createProcedure",
+      description: "Crear un nuevo procedimiento médico en el sistema. Úsalo cuando el paciente solicite un procedimiento que no está en la lista de disponibles.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Nombre del procedimiento en inglés" },
+          nameEs: { type: "string", description: "Nombre del procedimiento en español" },
+          category: { 
+            type: "string", 
+            enum: ["surgery", "imaging", "therapy", "pharmacy", "consultation", "emergency", "preventive", "cosmetic", "experimental", "alternative"],
+            description: "Categoría del procedimiento" 
+          },
+          requiresPreAuth: { type: "boolean", description: "Si requiere pre-autorización" },
+          costThreshold: { type: "number", description: "Umbral de costo en USD" },
+          sessionLimit: { type: "number", description: "Límite de sesiones por año" },
+          conditions: { type: "array", items: { type: "string" }, description: "Lista de condiciones" },
+          isExcluded: { type: "boolean", description: "Si está excluido de cobertura" },
+          createdBy: { type: "string", description: "Quién creó el procedimiento" },
+        },
+        required: ["name", "nameEs", "category", "requiresPreAuth", "isExcluded", "createdBy"],
       },
     },
   },
@@ -289,6 +333,13 @@ export const processMessage = internalAction({
       return { error: "Missing API keys", status: "error" };
     }
 
+    // Cargar procedimientos disponibles para contexto
+    const procedures = await ctx.runQuery(api.procedures.getAll);
+    const proceduresList = procedures
+      .map(p => `- ${p.nameEs} (${p.category})${p.requiresPreAuth ? ' [requiere autorización]' : ' [autorización automática]'}`)
+      .join('\n');
+    console.log(`📋 Cargados ${procedures.length} procedimientos`);
+
     // Cargar últimos 5 mensajes de Convex
     const history = await ctx.runQuery(api.messages.getRecentMessages, {
       phoneNumber: from,
@@ -301,7 +352,7 @@ export const processMessage = internalAction({
       ? Math.max(...history.map((m) => m.turnNumber)) + 1
       : 1;
 
-    // Construir el system prompt con contexto del teléfono
+    // Construir el system prompt con contexto del teléfono y procedimientos
     const systemPrompt = `
 CONTEXTO DE LA CONVERSACIÓN ACTUAL:
 - Número de teléfono del paciente: ${from}
@@ -309,6 +360,9 @@ CONTEXTO DE LA CONVERSACIÓN ACTUAL:
 - Al inicio de la conversación, busca si ya existe con getPatientInfo usando este número
 - Recuerda pedir la CÉDULA si aún no la tienes
 - Recuerda pedir el NOMBRE COMPLETO si aún no lo tienes
+
+PROCEDIMIENTOS DISPONIBLES:
+${proceduresList}
 
 ${SIMPLE_WHATSAPP_PROMPT}`;
 
@@ -403,6 +457,25 @@ ${SIMPLE_WHATSAPP_PROMPT}`;
                 message: registerResult.action === "created"
                   ? `Paciente registrado exitosamente`
                   : `Paciente actualizado exitosamente`,
+              };
+              break;
+
+            case "createProcedure":
+              const createProcResult = await ctx.runMutation(api.procedures.create, {
+                name: toolArgs.name,
+                nameEs: toolArgs.nameEs,
+                category: toolArgs.category,
+                requiresPreAuth: toolArgs.requiresPreAuth,
+                costThreshold: toolArgs.costThreshold,
+                sessionLimit: toolArgs.sessionLimit,
+                conditions: toolArgs.conditions,
+                isExcluded: toolArgs.isExcluded,
+                createdBy: toolArgs.createdBy || "patient",
+              });
+              result = {
+                success: true,
+                id: String(createProcResult),
+                message: `Procedimiento "${toolArgs.nameEs}" registrado exitosamente`,
               };
               break;
 
