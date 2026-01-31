@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Play, 
   Square, 
@@ -8,6 +8,7 @@ import {
   Plus, 
   X, 
   ChevronLeft, 
+  ChevronDown,
   Settings, 
   Eye, 
   Loader2, 
@@ -27,6 +28,11 @@ import {
   HelpCircle,
   Clock,
   Database,
+  History,
+  Trash2,
+  Pencil,
+  Copy,
+  Lightbulb,
 } from 'lucide-react';
 import type { 
   Evaluation, 
@@ -37,19 +43,22 @@ import type {
   RoundResult,
   MultiRoundConfig,
   PreviousRoundSummary,
+  DbChange,
+  PromptSuggestions,
 } from './types';
 
 // Generate unique ID
 const generateId = () => crypto.randomUUID();
 
 // Create new evaluation with default values
-const createNewEvaluation = (isMultiRound: boolean = false): Evaluation => ({
+const createNewEvaluation = (isMultiRound: boolean = false, defaultGreenPrompt?: string): Evaluation => ({
   id: generateId(),
   state: 'configuring',
   config: {
     evaluationPrompt: '',
     maxTurns: 10,
     systemPrompt: '',
+    greenAgentPrompt: defaultGreenPrompt, // Default Green Agent prompt
   },
   messages: [],
   currentTurn: 0,
@@ -67,6 +76,99 @@ const createNewEvaluation = (isMultiRound: boolean = false): Evaluation => ({
   pendingNextPrompt: undefined,
   previousRoundsSummary: isMultiRound ? [] : undefined,
 });
+
+// Type for saved evaluations from Convex
+interface SavedEvaluation {
+  _id: string;
+  type: string;
+  evaluationPrompt: string;
+  status: string;
+  createdAt: number;
+  completedAt?: number;
+  bestScore?: number;
+  rounds: Array<{
+    roundNumber: number;
+    systemPrompt: string;
+    messages: Array<{
+      role: string;
+      content: string;
+      turnNumber: number;
+      timestamp: number;
+      toolCalls?: Array<{
+        tool: string;
+        args: unknown;
+        result: unknown;
+      }>;
+    }>;
+    tacticCounts: TacticCounts;
+    evaluation: EvaluationResult;
+  }>;
+  dbChanges?: Array<{
+    action: string;
+    procedureId?: string;
+    procedureName: string;
+    roundNumber: number;
+    timestamp: number;
+  }>;
+}
+
+// Convert saved evaluation to frontend Evaluation type
+const convertSavedToEvaluation = (saved: SavedEvaluation): Evaluation => {
+  const isMultiRound = saved.type === 'multi';
+  const rounds: RoundResult[] = saved.rounds.map(r => ({
+    roundNumber: r.roundNumber,
+    systemPrompt: r.systemPrompt,
+    messages: r.messages.map(m => ({
+      role: m.role as 'red-agent' | 'green-agent',
+      content: m.content,
+      turnNumber: m.turnNumber,
+      timestamp: new Date(m.timestamp),
+      toolCalls: m.toolCalls?.map(tc => ({
+        tool: tc.tool,
+        args: tc.args as Record<string, unknown>,
+        result: tc.result,
+      })),
+    })),
+    tacticCounts: r.tacticCounts,
+    evaluation: r.evaluation,
+  }));
+
+  const lastRound = rounds[rounds.length - 1];
+  
+  // Convert dbChanges from Convex format to frontend format
+  const dbChanges: DbChange[] = saved.dbChanges?.map(dc => ({
+    action: dc.action as 'create' | 'update' | 'delete',
+    procedureId: dc.procedureId,
+    procedureName: dc.procedureName,
+    roundNumber: dc.roundNumber,
+    timestamp: dc.timestamp,
+  })) || [];
+  
+  return {
+    id: saved._id,
+    state: 'results',
+    config: {
+      evaluationPrompt: saved.evaluationPrompt,
+      maxTurns: lastRound?.messages.length || 10,
+      systemPrompt: lastRound?.systemPrompt || '',
+    },
+    messages: lastRound?.messages || [],
+    currentTurn: lastRound?.messages.length || 0,
+    evaluation: lastRound?.evaluation || null,
+    tacticCounts: lastRound?.tacticCounts || null,
+    error: null,
+    createdAt: new Date(saved.createdAt),
+    isMultiRound,
+    multiRoundConfig: isMultiRound ? { 
+      totalRounds: rounds.length, 
+      turnsPerRound: lastRound?.messages.length || 10 
+    } : undefined,
+    rounds: isMultiRound ? rounds : undefined,
+    currentRound: isMultiRound ? rounds.length : undefined,
+    scoreProgression: rounds.map(r => r.evaluation.successScore),
+    dbChanges,
+  };
+};
 
 // Get status indicator for sidebar
 const getStatusIndicator = (eval_: Evaluation): { icon: React.ReactNode; color: string; label: string } => {
@@ -128,6 +230,12 @@ export default function Dashboard() {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [activeEvalId, setActiveEvalId] = useState<string | null>(null);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [showHistory, setShowHistory] = useState(true);
+  const [defaultGreenPrompt, setDefaultGreenPrompt] = useState<string>('');
+  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [suggestionTab, setSuggestionTab] = useState<'green' | 'red'>('green');
   
   // Refs for chat auto-scroll and abort controllers
   const chatRef = useRef<HTMLDivElement>(null);
@@ -135,6 +243,52 @@ export default function Dashboard() {
 
   // Get active evaluation (derived state)
   const activeEval = evaluations.find(e => e.id === activeEvalId) || null;
+
+  // Load saved evaluations from Convex on mount
+  const loadSavedEvaluations = useCallback(async () => {
+    setIsLoadingHistory(true);
+    try {
+      const response = await fetch('/api/evaluations');
+      if (response.ok) {
+        const saved: SavedEvaluation[] = await response.json();
+        // Only load completed evaluations that have rounds
+        const completedEvals = saved
+          .filter(e => e.status === 'completed' && e.rounds && e.rounds.length > 0)
+          .map(convertSavedToEvaluation);
+        
+        // Merge with existing evaluations (avoid duplicates)
+        setEvaluations(prev => {
+          const existingIds = new Set(prev.map(e => e.id));
+          const newEvals = completedEvals.filter(e => !existingIds.has(e.id));
+          return [...prev, ...newEvals];
+        });
+      }
+    } catch (error) {
+      console.error('Error loading saved evaluations:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSavedEvaluations();
+  }, [loadSavedEvaluations]);
+
+  // Load default Green Agent prompt on mount
+  useEffect(() => {
+    const loadGreenAgentTemplate = async () => {
+      try {
+        const response = await fetch('/api/green-agent-template');
+        if (response.ok) {
+          const data = await response.json();
+          setDefaultGreenPrompt(data.prompt);
+        }
+      } catch (error) {
+        console.error('Error loading Green Agent template:', error);
+      }
+    };
+    loadGreenAgentTemplate();
+  }, []);
 
   // Auto-scroll chat when messages change
   useEffect(() => {
@@ -183,10 +337,11 @@ export default function Dashboard() {
 
   // Action: Create new evaluation
   const handleCreateEvaluation = (isMultiRound: boolean = false) => {
-    const newEval = createNewEvaluation(isMultiRound);
+    const newEval = createNewEvaluation(isMultiRound, defaultGreenPrompt);
     setEvaluations(prev => [...prev, newEval]);
     setActiveEvalId(newEval.id);
     setSelectedRound(null);
+    setShowAdvancedConfig(false); // Reset advanced config state
   };
 
   // Action: Delete evaluation
@@ -273,6 +428,7 @@ export default function Dashboard() {
           systemPrompt: eval_.config.systemPrompt,
           maxTurns: eval_.config.maxTurns,
           evaluationPrompt: eval_.config.evaluationPrompt,
+          greenAgentPrompt: eval_.config.greenAgentPrompt, // Pass custom Green Agent prompt
         }),
         signal: controller.signal,
       });
@@ -407,6 +563,7 @@ export default function Dashboard() {
           roundNumber,
           totalRounds: eval_.multiRoundConfig.totalRounds,
           previousRounds: eval_.previousRoundsSummary || [],
+          greenAgentPrompt: eval_.config.greenAgentPrompt, // Pass custom Green Agent prompt
         }),
         signal: controller.signal,
       });
@@ -495,9 +652,20 @@ export default function Dashboard() {
 
                 case 'next_prompt_ready':
                   // Not the last round - pause and show the next prompt for editing
+                  // Also set isLoadingSuggestions to true while we wait for suggestions
                   updateEvaluation(id, {
                     state: 'waiting_for_continue',
                     pendingNextPrompt: event.nextPrompt,
+                    isLoadingSuggestions: true,
+                    pendingSuggestions: undefined, // Clear previous suggestions
+                  });
+                  break;
+
+                case 'suggestions_ready':
+                  // Suggestions received - update the evaluation
+                  updateEvaluation(id, {
+                    isLoadingSuggestions: false,
+                    pendingSuggestions: event.suggestions,
                   });
                   break;
 
@@ -618,6 +786,91 @@ export default function Dashboard() {
     updateEvaluation(id, { state: 'configuring' });
   };
 
+  // Action: Request improvement suggestions from Purple Agent
+  const handleRequestSuggestions = async (id: string) => {
+    const eval_ = evaluations.find(e => e.id === id);
+    if (!eval_ || !eval_.evaluation) return;
+
+    setIsLoadingSuggestions(true);
+
+    try {
+      const response = await fetch('/api/suggest-improvements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: eval_.messages.map(m => ({
+            role: m.role,
+            content: m.content,
+            turnNumber: m.turnNumber,
+          })),
+          evaluation: eval_.evaluation,
+          greenAgentPrompt: eval_.config.greenAgentPrompt,
+          redAgentPrompt: eval_.config.systemPrompt,
+          evaluationPrompt: eval_.config.evaluationPrompt,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Error obteniendo sugerencias');
+      }
+
+      const suggestions: PromptSuggestions = await response.json();
+      updateEvaluation(id, { promptSuggestions: suggestions });
+    } catch (err: any) {
+      console.error('Error requesting suggestions:', err);
+      updateEvaluation(id, { error: err.message });
+    } finally {
+      setIsLoadingSuggestions(false);
+    }
+  };
+
+  // Action: Re-run simulation with improved Green Agent prompt
+  const handleRerunWithImprovedGreen = (id: string) => {
+    const eval_ = evaluations.find(e => e.id === id);
+    if (!eval_ || !eval_.promptSuggestions) return;
+
+    // Update the green agent prompt and go back to preview
+    updateEvalConfig(id, { greenAgentPrompt: eval_.promptSuggestions.greenAgentImproved });
+    updateEvaluation(id, { 
+      state: 'preview',
+      promptSuggestions: undefined,
+      evaluation: null,
+      messages: [],
+    });
+  };
+
+  // Action: Restart multi-round evaluation with improved Green Agent prompt
+  const handleRestartMultiRoundWithImprovedGreen = (id: string) => {
+    const eval_ = evaluations.find(e => e.id === id);
+    if (!eval_ || !eval_.pendingSuggestions) return;
+
+    // Update the green agent prompt and reset to preview (multi-round preview)
+    updateEvalConfig(id, { greenAgentPrompt: eval_.pendingSuggestions.greenAgentImproved });
+    updateEvaluation(id, { 
+      state: 'preview',
+      rounds: [],
+      scoreProgression: [],
+      messages: [],
+      previousRoundsSummary: [],
+      pendingSuggestions: undefined,
+      pendingNextPrompt: undefined,
+      isLoadingSuggestions: false,
+      currentRound: 0,
+      evaluation: null,
+    });
+  };
+
+  // Action: Use suggested Red Agent prompt for next round
+  const handleUseRedSuggestionForNextRound = (id: string) => {
+    const eval_ = evaluations.find(e => e.id === id);
+    if (!eval_ || !eval_.pendingSuggestions) return;
+
+    // Replace the pending next prompt with the suggested Red Agent prompt
+    updateEvaluation(id, {
+      pendingNextPrompt: eval_.pendingSuggestions.redAgentImproved,
+    });
+  };
+
   // Render sidebar item
   const renderSidebarItem = (eval_: Evaluation) => {
     const status = getStatusIndicator(eval_);
@@ -658,7 +911,20 @@ export default function Dashboard() {
         </p>
         <div className="flex items-center justify-between mt-1">
           <p className="text-xs text-[#9b9a97]">
-            {eval_.createdAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+            {eval_.createdAt instanceof Date 
+              ? eval_.createdAt.toLocaleString('es-ES', { 
+                  month: 'short', 
+                  day: 'numeric',
+                  hour: '2-digit', 
+                  minute: '2-digit' 
+                })
+              : new Date(eval_.createdAt).toLocaleString('es-ES', { 
+                  month: 'short', 
+                  day: 'numeric',
+                  hour: '2-digit', 
+                  minute: '2-digit' 
+                })
+            }
           </p>
           {eval_.isMultiRound && (
             <span className="text-xs bg-[#e8deee] text-[#9065b0] px-1.5 py-0.5 rounded">
@@ -806,6 +1072,44 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* Advanced Configuration - Green Agent Prompt */}
+          <div className="border border-[#e3e2de] rounded-lg">
+            <button
+              onClick={() => setShowAdvancedConfig(!showAdvancedConfig)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-[#f7f6f3] rounded-lg transition-colors"
+            >
+              <span className="text-sm font-medium text-[#6b6b6b] flex items-center gap-2">
+                <Settings className="w-4 h-4" /> Configuración Avanzada (Green Agent)
+              </span>
+              <ChevronDown className={`w-4 h-4 text-[#9b9a97] transition-transform ${showAdvancedConfig ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showAdvancedConfig && (
+              <div className="px-4 pb-4 space-y-3">
+                <div className="bg-[#dbeddb] border border-[#0f7b6c]/30 rounded-lg p-3 text-sm text-[#6b6b6b]">
+                  <p className="font-medium text-[#0f7b6c] mb-1 flex items-center gap-2">
+                    <Shield className="w-4 h-4" /> System Prompt del Defensor
+                  </p>
+                  <p>Este es el prompt del Green Agent (sistema de autorización). Puedes modificarlo para probar diferentes configuraciones de defensa.</p>
+                </div>
+                
+                <textarea
+                  value={eval_.config.greenAgentPrompt || ''}
+                  onChange={(e) => updateEvalConfig(eval_.id, { greenAgentPrompt: e.target.value })}
+                  placeholder="System prompt del Green Agent..."
+                  className="w-full h-64 px-4 py-3 bg-[#f7f6f3] border border-[#e3e2de] rounded-lg text-[#37352f] font-mono text-xs focus:outline-none focus:border-[#2383e2] resize-none custom-scrollbar"
+                />
+                
+                <button
+                  onClick={() => updateEvalConfig(eval_.id, { greenAgentPrompt: defaultGreenPrompt })}
+                  className="text-sm text-[#2383e2] hover:text-[#1a6bc4] transition-colors flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Restaurar por defecto (vulnerable)
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="bg-[#e8deee] border border-[#9065b0]/30 rounded-lg p-4 text-sm text-[#6b6b6b]">
             <p className="font-medium mb-2 text-[#9065b0] flex items-center gap-2">
               <RefreshCw className="w-4 h-4" /> ¿Cómo funciona?
@@ -944,25 +1248,124 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Next round prompt editor */}
-        <div className="bg-white rounded-lg p-6 border border-[#2383e2]">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-[#37352f]">
-            <FileText className="w-5 h-5 text-[#2383e2]" /> 
-            Prompt para Ronda {nextRoundNumber} de {totalRounds}
-          </h3>
-
-          <div className="bg-[#e8f4fd] border border-[#2383e2]/30 rounded-lg p-3 mb-4 text-sm text-[#6b6b6b]">
-            <p>El Purple Agent ha generado un prompt mejorado basándose en los resultados anteriores. 
-               Puedes editarlo antes de continuar.</p>
+        {/* Suggestions Section */}
+        <div className="bg-[#e8deee] rounded-lg p-6 border border-[#9065b0]/30">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-[#37352f] flex items-center gap-2">
+              <Lightbulb className="w-4 h-4 text-[#9065b0]" /> Sugerencias de Mejora
+            </h3>
           </div>
 
-          <textarea
-            value={eval_.pendingNextPrompt || ''}
-            onChange={(e) => updateEvaluation(eval_.id, { pendingNextPrompt: e.target.value })}
-            className="w-full h-80 px-4 py-3 bg-[#f7f6f3] border border-[#e3e2de] rounded-lg text-[#37352f] font-mono text-sm focus:outline-none focus:border-[#2383e2] resize-none custom-scrollbar"
-          />
+          {eval_.isLoadingSuggestions && (
+            <div className="flex items-center justify-center py-8">
+              <div className="flex items-center gap-3 text-[#9065b0]">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm">Generando sugerencias de mejora...</span>
+              </div>
+            </div>
+          )}
 
-          <div className="flex gap-3 mt-4">
+          {!eval_.isLoadingSuggestions && !eval_.pendingSuggestions && (
+            <p className="text-sm text-[#6b6b6b] text-center py-4">
+              Las sugerencias no pudieron generarse. Puedes continuar con la siguiente ronda.
+            </p>
+          )}
+
+          {eval_.pendingSuggestions && (
+            <div className="space-y-4">
+              {/* Tabs */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSuggestionTab('green')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                    suggestionTab === 'green'
+                      ? 'bg-[#0f7b6c] text-white'
+                      : 'bg-white/50 text-[#6b6b6b] hover:bg-white/80'
+                  }`}
+                >
+                  <Shield className="w-4 h-4" /> Defensa (Green)
+                </button>
+                <button
+                  onClick={() => setSuggestionTab('red')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                    suggestionTab === 'red'
+                      ? 'bg-[#e03e3e] text-white'
+                      : 'bg-white/50 text-[#6b6b6b] hover:bg-white/80'
+                  }`}
+                >
+                  <Swords className="w-4 h-4" /> Ataque (Red)
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              <div className="bg-white rounded-lg p-4 border border-[#e3e2de]">
+                {suggestionTab === 'green' ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="text-sm font-medium text-[#0f7b6c] mb-2">Análisis de Defensa</div>
+                      <p className="text-sm text-[#6b6b6b]">{eval_.pendingSuggestions.analysisGreen}</p>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[#0f7b6c] mb-2">Prompt Mejorado</div>
+                      <pre className="text-xs text-[#37352f] whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar bg-[#f7f6f3] p-4 rounded-lg border border-[#e3e2de]">
+                        {eval_.pendingSuggestions.greenAgentImproved}
+                      </pre>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(eval_.pendingSuggestions?.greenAgentImproved || '');
+                          }}
+                          className="px-3 py-1.5 bg-[#f7f6f3] hover:bg-[#efefef] border border-[#e3e2de] text-[#37352f] text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" /> Copiar
+                        </button>
+                        <button
+                          onClick={() => handleRestartMultiRoundWithImprovedGreen(eval_.id)}
+                          className="px-3 py-1.5 bg-[#0f7b6c] hover:bg-[#0a5e52] text-white text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" /> Re-correr Todo con Green Mejorado
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mb-4">
+                      <div className="text-sm font-medium text-[#e03e3e] mb-2">Análisis de Ataque</div>
+                      <p className="text-sm text-[#6b6b6b]">{eval_.pendingSuggestions.analysisRed}</p>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[#e03e3e] mb-2">Prompt Mejorado</div>
+                      <pre className="text-xs text-[#37352f] whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar bg-[#f7f6f3] p-4 rounded-lg border border-[#e3e2de]">
+                        {eval_.pendingSuggestions.redAgentImproved}
+                      </pre>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(eval_.pendingSuggestions?.redAgentImproved || '');
+                          }}
+                          className="px-3 py-1.5 bg-[#f7f6f3] hover:bg-[#efefef] border border-[#e3e2de] text-[#37352f] text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" /> Copiar
+                        </button>
+                        <button
+                          onClick={() => handleUseRedSuggestionForNextRound(eval_.id)}
+                          className="px-3 py-1.5 bg-[#e03e3e] hover:bg-[#c93535] text-white text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Play className="w-3 h-3" /> Usar para Ronda {nextRoundNumber}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="bg-white rounded-lg p-6 border border-[#e3e2de]">
+          <div className="flex gap-3 justify-center">
             <button
               onClick={() => handleFinishMultiRoundEarly(eval_.id)}
               className="px-6 py-2 bg-[#f7f6f3] hover:bg-[#efefef] border border-[#e3e2de] text-[#37352f] rounded-lg transition-colors flex items-center gap-2"
@@ -1001,6 +1404,20 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <p className="text-sm text-[#6b6b6b]">{msg.content}</p>
+                  {/* Tool Calls Display */}
+                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {msg.toolCalls.map((call, callIdx) => (
+                        <div 
+                          key={callIdx}
+                          className="flex items-start gap-2 text-xs bg-[#f7f6f3] rounded px-2 py-1 border border-[#e3e2de]"
+                        >
+                          <Database className="w-3 h-3 text-[#9065b0] mt-0.5" />
+                          <span className="font-mono text-[#9065b0]">{call.tool}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1224,6 +1641,60 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* DB Changes - Critical Vulnerability Alert (for all rounds) */}
+        {eval_.dbChanges && eval_.dbChanges.length > 0 && (
+          <div className="bg-[#ffe2dd] rounded-lg p-6 border-2 border-[#e03e3e]">
+            <h3 className="font-semibold mb-3 text-[#e03e3e] flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5" /> VULNERABILIDAD CRÍTICA: Manipulación de Base de Datos
+            </h3>
+            <p className="text-sm text-[#6b6b6b] mb-4">
+              El Green Agent realizó {eval_.dbChanges.length} cambio{eval_.dbChanges.length > 1 ? 's' : ''} en la base de datos durante las rondas:
+            </p>
+            <div className="space-y-2">
+              {eval_.dbChanges.map((change, idx) => (
+                <div 
+                  key={idx}
+                  className={`flex items-center gap-3 p-3 rounded-lg ${
+                    change.action === 'create' 
+                      ? 'bg-[#dbeddb] border border-[#0f7b6c]' 
+                      : change.action === 'update' 
+                      ? 'bg-[#fdecc8] border border-[#d9730d]'
+                      : 'bg-[#ffe2dd] border border-[#e03e3e]'
+                  }`}
+                >
+                  <div className={`p-1.5 rounded ${
+                    change.action === 'create' 
+                      ? 'bg-[#0f7b6c] text-white' 
+                      : change.action === 'update' 
+                      ? 'bg-[#d9730d] text-white'
+                      : 'bg-[#e03e3e] text-white'
+                  }`}>
+                    {change.action === 'create' && <Plus className="w-4 h-4" />}
+                    {change.action === 'update' && <Pencil className="w-4 h-4" />}
+                    {change.action === 'delete' && <Trash2 className="w-4 h-4" />}
+                  </div>
+                  <div className="flex-1">
+                    <span className={`text-xs font-semibold uppercase ${
+                      change.action === 'create' 
+                        ? 'text-[#0f7b6c]' 
+                        : change.action === 'update' 
+                        ? 'text-[#d9730d]'
+                        : 'text-[#e03e3e]'
+                    }`}>
+                      {change.action}
+                    </span>
+                    <span className="mx-2 text-[#9b9a97]">|</span>
+                    <span className="text-[#37352f] font-medium">{change.procedureName}</span>
+                  </div>
+                  <div className="text-xs text-[#9b9a97] bg-white/50 px-2 py-1 rounded">
+                    Ronda {change.roundNumber}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Round selector */}
         <div className="bg-white rounded-lg p-4 border border-[#e3e2de]">
           <div className="flex gap-2 overflow-x-auto">
@@ -1345,6 +1816,20 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <p className="text-sm text-[#6b6b6b]">{msg.content}</p>
+                    {/* Tool Calls Display */}
+                    {msg.toolCalls && msg.toolCalls.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {msg.toolCalls.map((call, callIdx) => (
+                          <div 
+                            key={callIdx}
+                            className="flex items-start gap-2 text-xs bg-[#f7f6f3] rounded px-2 py-1 border border-[#e3e2de]"
+                          >
+                            <Database className="w-3 h-3 text-[#9065b0] mt-0.5" />
+                            <span className="font-mono text-[#9065b0]">{call.tool}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1361,6 +1846,117 @@ export default function Dashboard() {
             </div>
           </>
         )}
+
+        {/* Suggestions Section */}
+        <div className="bg-[#e8deee] rounded-lg p-6 border border-[#9065b0]/30">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-[#37352f] flex items-center gap-2">
+              <Lightbulb className="w-4 h-4 text-[#9065b0]" /> Sugerencias de Mejora
+            </h3>
+            {!eval_.promptSuggestions && (
+              <button
+                onClick={() => handleRequestSuggestions(eval_.id)}
+                disabled={isLoadingSuggestions}
+                className="px-4 py-2 bg-[#9065b0] hover:bg-[#7c5699] disabled:bg-[#9065b0]/50 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+              >
+                {isLoadingSuggestions ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Analizando...</>
+                ) : (
+                  <><Lightbulb className="w-4 h-4" /> Solicitar Sugerencias</>
+                )}
+              </button>
+            )}
+          </div>
+
+          {!eval_.promptSuggestions && !isLoadingSuggestions && (
+            <p className="text-sm text-[#6b6b6b]">
+              El Purple Agent puede analizar todas las rondas y sugerir mejoras tanto para fortalecer la defensa (Green Agent) como para optimizar el ataque (Red Agent).
+            </p>
+          )}
+
+          {eval_.promptSuggestions && (
+            <div className="space-y-4">
+              {/* Tabs */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSuggestionTab('green')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                    suggestionTab === 'green'
+                      ? 'bg-[#0f7b6c] text-white'
+                      : 'bg-white/50 text-[#6b6b6b] hover:bg-white/80'
+                  }`}
+                >
+                  <Shield className="w-4 h-4" /> Defensa (Green)
+                </button>
+                <button
+                  onClick={() => setSuggestionTab('red')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                    suggestionTab === 'red'
+                      ? 'bg-[#e03e3e] text-white'
+                      : 'bg-white/50 text-[#6b6b6b] hover:bg-white/80'
+                  }`}
+                >
+                  <Swords className="w-4 h-4" /> Ataque (Red)
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              <div className="bg-white rounded-lg p-4 border border-[#e3e2de]">
+                {suggestionTab === 'green' ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="text-sm font-medium text-[#0f7b6c] mb-2">Análisis de Defensa</div>
+                      <p className="text-sm text-[#6b6b6b]">{eval_.promptSuggestions.analysisGreen}</p>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[#0f7b6c] mb-2">Prompt Mejorado</div>
+                      <pre className="text-xs text-[#37352f] whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar bg-[#f7f6f3] p-4 rounded-lg border border-[#e3e2de]">
+                        {eval_.promptSuggestions.greenAgentImproved}
+                      </pre>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(eval_.promptSuggestions?.greenAgentImproved || '');
+                          }}
+                          className="px-3 py-1.5 bg-[#f7f6f3] hover:bg-[#efefef] border border-[#e3e2de] text-[#37352f] text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" /> Copiar
+                        </button>
+                        <button
+                          onClick={() => handleRerunWithImprovedGreen(eval_.id)}
+                          className="px-3 py-1.5 bg-[#0f7b6c] hover:bg-[#0a5e52] text-white text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Play className="w-3 h-3" /> Re-correr con Green Mejorado
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mb-4">
+                      <div className="text-sm font-medium text-[#e03e3e] mb-2">Análisis de Ataque</div>
+                      <p className="text-sm text-[#6b6b6b]">{eval_.promptSuggestions.analysisRed}</p>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[#e03e3e] mb-2">Prompt Mejorado</div>
+                      <pre className="text-xs text-[#37352f] whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar bg-[#f7f6f3] p-4 rounded-lg border border-[#e3e2de]">
+                        {eval_.promptSuggestions.redAgentImproved}
+                      </pre>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(eval_.promptSuggestions?.redAgentImproved || '');
+                        }}
+                        className="mt-3 px-3 py-1.5 bg-[#f7f6f3] hover:bg-[#efefef] border border-[#e3e2de] text-[#37352f] text-sm rounded-lg transition-colors flex items-center gap-1"
+                      >
+                        <Copy className="w-3 h-3" /> Copiar
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Actions */}
         <div className="flex gap-3">
@@ -1430,6 +2026,44 @@ export default function Dashboard() {
               className="w-32 px-4 py-2 bg-[#f7f6f3] border border-[#e3e2de] rounded-lg text-[#37352f] focus:outline-none focus:border-[#2383e2]"
             />
             <span className="ml-2 text-[#9b9a97] text-sm">(mínimo 2, máximo 20)</span>
+          </div>
+
+          {/* Advanced Configuration - Green Agent Prompt */}
+          <div className="border border-[#e3e2de] rounded-lg">
+            <button
+              onClick={() => setShowAdvancedConfig(!showAdvancedConfig)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-[#f7f6f3] rounded-lg transition-colors"
+            >
+              <span className="text-sm font-medium text-[#6b6b6b] flex items-center gap-2">
+                <Settings className="w-4 h-4" /> Configuración Avanzada (Green Agent)
+              </span>
+              <ChevronDown className={`w-4 h-4 text-[#9b9a97] transition-transform ${showAdvancedConfig ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showAdvancedConfig && (
+              <div className="px-4 pb-4 space-y-3">
+                <div className="bg-[#dbeddb] border border-[#0f7b6c]/30 rounded-lg p-3 text-sm text-[#6b6b6b]">
+                  <p className="font-medium text-[#0f7b6c] mb-1 flex items-center gap-2">
+                    <Shield className="w-4 h-4" /> System Prompt del Defensor
+                  </p>
+                  <p>Este es el prompt del Green Agent (sistema de autorización). Puedes modificarlo para probar diferentes configuraciones de defensa.</p>
+                </div>
+                
+                <textarea
+                  value={eval_.config.greenAgentPrompt || ''}
+                  onChange={(e) => updateEvalConfig(eval_.id, { greenAgentPrompt: e.target.value })}
+                  placeholder="System prompt del Green Agent..."
+                  className="w-full h-64 px-4 py-3 bg-[#f7f6f3] border border-[#e3e2de] rounded-lg text-[#37352f] font-mono text-xs focus:outline-none focus:border-[#2383e2] resize-none custom-scrollbar"
+                />
+                
+                <button
+                  onClick={() => updateEvalConfig(eval_.id, { greenAgentPrompt: defaultGreenPrompt })}
+                  className="text-sm text-[#2383e2] hover:text-[#1a6bc4] transition-colors flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Restaurar por defecto (vulnerable)
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -1552,6 +2186,29 @@ export default function Dashboard() {
                 <span className="text-[#9b9a97]">· Turno {msg.turnNumber}</span>
               </div>
               <p className="text-[#37352f] whitespace-pre-wrap">{msg.content}</p>
+              {/* Tool Calls Display */}
+              {msg.toolCalls && msg.toolCalls.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {msg.toolCalls.map((call, callIdx) => (
+                    <div 
+                      key={callIdx}
+                      className="flex items-start gap-2 text-xs bg-[#f7f6f3] rounded px-2 py-1.5 border border-[#e3e2de]"
+                    >
+                      <Database className="w-3.5 h-3.5 text-[#9065b0] mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="font-mono font-medium text-[#9065b0]">{call.tool}</span>
+                        <span className="text-[#9b9a97] mx-1">→</span>
+                        <span className="text-[#6b6b6b] break-all">
+                          {typeof call.result === 'object' 
+                            ? JSON.stringify(call.result).substring(0, 100) + (JSON.stringify(call.result).length > 100 ? '...' : '')
+                            : String(call.result)
+                          }
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 
@@ -1570,7 +2227,7 @@ export default function Dashboard() {
   // Render: Results state (single)
   const renderResults = (eval_: Evaluation) => {
     if (!eval_.evaluation) return null;
-    const { evaluation, tacticCounts, messages } = eval_;
+    const { evaluation, tacticCounts, messages, dbChanges } = eval_;
 
     return (
       <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
@@ -1645,6 +2302,60 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* DB Changes - Critical Vulnerability Alert */}
+        {dbChanges && dbChanges.length > 0 && (
+          <div className="bg-[#ffe2dd] rounded-lg p-6 border-2 border-[#e03e3e]">
+            <h3 className="font-semibold mb-3 text-[#e03e3e] flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5" /> VULNERABILIDAD CRÍTICA: Manipulación de Base de Datos
+            </h3>
+            <p className="text-sm text-[#6b6b6b] mb-4">
+              El Green Agent realizó {dbChanges.length} cambio{dbChanges.length > 1 ? 's' : ''} en la base de datos durante la simulación:
+            </p>
+            <div className="space-y-2">
+              {dbChanges.map((change, idx) => (
+                <div 
+                  key={idx}
+                  className={`flex items-center gap-3 p-3 rounded-lg ${
+                    change.action === 'create' 
+                      ? 'bg-[#dbeddb] border border-[#0f7b6c]' 
+                      : change.action === 'update' 
+                      ? 'bg-[#fdecc8] border border-[#d9730d]'
+                      : 'bg-[#ffe2dd] border border-[#e03e3e]'
+                  }`}
+                >
+                  <div className={`p-1.5 rounded ${
+                    change.action === 'create' 
+                      ? 'bg-[#0f7b6c] text-white' 
+                      : change.action === 'update' 
+                      ? 'bg-[#d9730d] text-white'
+                      : 'bg-[#e03e3e] text-white'
+                  }`}>
+                    {change.action === 'create' && <Plus className="w-4 h-4" />}
+                    {change.action === 'update' && <Pencil className="w-4 h-4" />}
+                    {change.action === 'delete' && <Trash2 className="w-4 h-4" />}
+                  </div>
+                  <div className="flex-1">
+                    <span className={`text-xs font-semibold uppercase ${
+                      change.action === 'create' 
+                        ? 'text-[#0f7b6c]' 
+                        : change.action === 'update' 
+                        ? 'text-[#d9730d]'
+                        : 'text-[#e03e3e]'
+                    }`}>
+                      {change.action}
+                    </span>
+                    <span className="mx-2 text-[#9b9a97]">|</span>
+                    <span className="text-[#37352f] font-medium">{change.procedureName}</span>
+                  </div>
+                  <div className="text-xs text-[#9b9a97]">
+                    Turno {change.roundNumber}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {evaluation.effectiveTactics.length > 0 && (
           <div className="bg-white rounded-lg p-6 border border-[#e3e2de]">
             <h3 className="font-semibold mb-3 text-[#37352f] flex items-center gap-2">
@@ -1675,6 +2386,117 @@ export default function Dashboard() {
           <p className="text-[#6b6b6b] whitespace-pre-wrap">{evaluation.detailedAnalysis}</p>
         </div>
 
+        {/* Suggestions Section */}
+        <div className="bg-[#e8deee] rounded-lg p-6 border border-[#9065b0]/30">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-[#37352f] flex items-center gap-2">
+              <Lightbulb className="w-4 h-4 text-[#9065b0]" /> Sugerencias de Mejora
+            </h3>
+            {!eval_.promptSuggestions && (
+              <button
+                onClick={() => handleRequestSuggestions(eval_.id)}
+                disabled={isLoadingSuggestions}
+                className="px-4 py-2 bg-[#9065b0] hover:bg-[#7c5699] disabled:bg-[#9065b0]/50 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+              >
+                {isLoadingSuggestions ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Analizando...</>
+                ) : (
+                  <><Lightbulb className="w-4 h-4" /> Solicitar Sugerencias</>
+                )}
+              </button>
+            )}
+          </div>
+
+          {!eval_.promptSuggestions && !isLoadingSuggestions && (
+            <p className="text-sm text-[#6b6b6b]">
+              El Purple Agent puede analizar la conversación y sugerir mejoras tanto para fortalecer la defensa (Green Agent) como para optimizar el ataque (Red Agent).
+            </p>
+          )}
+
+          {eval_.promptSuggestions && (
+            <div className="space-y-4">
+              {/* Tabs */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSuggestionTab('green')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                    suggestionTab === 'green'
+                      ? 'bg-[#0f7b6c] text-white'
+                      : 'bg-white/50 text-[#6b6b6b] hover:bg-white/80'
+                  }`}
+                >
+                  <Shield className="w-4 h-4" /> Defensa (Green)
+                </button>
+                <button
+                  onClick={() => setSuggestionTab('red')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                    suggestionTab === 'red'
+                      ? 'bg-[#e03e3e] text-white'
+                      : 'bg-white/50 text-[#6b6b6b] hover:bg-white/80'
+                  }`}
+                >
+                  <Swords className="w-4 h-4" /> Ataque (Red)
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              <div className="bg-white rounded-lg p-4 border border-[#e3e2de]">
+                {suggestionTab === 'green' ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="text-sm font-medium text-[#0f7b6c] mb-2">Análisis de Defensa</div>
+                      <p className="text-sm text-[#6b6b6b]">{eval_.promptSuggestions.analysisGreen}</p>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[#0f7b6c] mb-2">Prompt Mejorado</div>
+                      <pre className="text-xs text-[#37352f] whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar bg-[#f7f6f3] p-4 rounded-lg border border-[#e3e2de]">
+                        {eval_.promptSuggestions.greenAgentImproved}
+                      </pre>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(eval_.promptSuggestions?.greenAgentImproved || '');
+                          }}
+                          className="px-3 py-1.5 bg-[#f7f6f3] hover:bg-[#efefef] border border-[#e3e2de] text-[#37352f] text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" /> Copiar
+                        </button>
+                        <button
+                          onClick={() => handleRerunWithImprovedGreen(eval_.id)}
+                          className="px-3 py-1.5 bg-[#0f7b6c] hover:bg-[#0a5e52] text-white text-sm rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Play className="w-3 h-3" /> Re-correr con Green Mejorado
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mb-4">
+                      <div className="text-sm font-medium text-[#e03e3e] mb-2">Análisis de Ataque</div>
+                      <p className="text-sm text-[#6b6b6b]">{eval_.promptSuggestions.analysisRed}</p>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[#e03e3e] mb-2">Prompt Mejorado</div>
+                      <pre className="text-xs text-[#37352f] whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar bg-[#f7f6f3] p-4 rounded-lg border border-[#e3e2de]">
+                        {eval_.promptSuggestions.redAgentImproved}
+                      </pre>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(eval_.promptSuggestions?.redAgentImproved || '');
+                        }}
+                        className="mt-3 px-3 py-1.5 bg-[#f7f6f3] hover:bg-[#efefef] border border-[#e3e2de] text-[#37352f] text-sm rounded-lg transition-colors flex items-center gap-1"
+                      >
+                        <Copy className="w-3 h-3" /> Copiar
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="bg-white rounded-lg p-6 border border-[#e3e2de]">
           <h3 className="font-semibold mb-3 text-[#37352f] flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-[#6b6b6b]" /> Conversación Completa
@@ -1696,6 +2518,29 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <p className="text-sm text-[#6b6b6b]">{msg.content}</p>
+                {/* Tool Calls Display */}
+                {msg.toolCalls && msg.toolCalls.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {msg.toolCalls.map((call, callIdx) => (
+                      <div 
+                        key={callIdx}
+                        className="flex items-start gap-2 text-xs bg-[#f7f6f3] rounded px-2 py-1.5 border border-[#e3e2de]"
+                      >
+                        <Database className="w-3.5 h-3.5 text-[#9065b0] mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-mono font-medium text-[#9065b0]">{call.tool}</span>
+                          <span className="text-[#9b9a97] mx-1">→</span>
+                          <span className="text-[#6b6b6b] break-all">
+                            {typeof call.result === 'object' 
+                              ? JSON.stringify(call.result).substring(0, 100) + (JSON.stringify(call.result).length > 100 ? '...' : '')
+                              : String(call.result)
+                            }
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -1722,6 +2567,10 @@ export default function Dashboard() {
   };
 
   // Main render
+  // Separate active (in-progress) evaluations from completed (historical) ones
+  const activeEvaluations = evaluations.filter(e => e.state !== 'results');
+  const completedEvaluations = evaluations.filter(e => e.state === 'results');
+
   return (
     <div className="h-screen flex bg-[#f7f6f3]">
       {/* Sidebar */}
@@ -1735,7 +2584,49 @@ export default function Dashboard() {
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {evaluations.map(renderSidebarItem)}
+          {/* Active evaluations section */}
+          {activeEvaluations.length > 0 && (
+            <div>
+              <div className="px-4 py-2 text-xs font-semibold text-[#9b9a97] uppercase tracking-wider bg-[#f7f6f3] border-b border-[#e3e2de]">
+                En progreso
+              </div>
+              {activeEvaluations.map(renderSidebarItem)}
+            </div>
+          )}
+
+          {/* Completed evaluations (history) section */}
+          {completedEvaluations.length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="w-full px-4 py-2 text-xs font-semibold text-[#9b9a97] uppercase tracking-wider bg-[#f7f6f3] border-b border-[#e3e2de] flex items-center justify-between hover:bg-[#efefef] transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <History className="w-3.5 h-3.5" />
+                  Historial ({completedEvaluations.length})
+                </span>
+                <ChevronLeft className={`w-4 h-4 transition-transform ${showHistory ? '-rotate-90' : 'rotate-0'}`} />
+              </button>
+              {showHistory && completedEvaluations.map(renderSidebarItem)}
+            </div>
+          )}
+
+          {/* Loading indicator */}
+          {isLoadingHistory && (
+            <div className="p-4 text-center text-[#9b9a97] text-sm flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Cargando historial...
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!isLoadingHistory && evaluations.length === 0 && (
+            <div className="p-6 text-center text-[#9b9a97] text-sm">
+              <Target className="w-8 h-8 mx-auto mb-2 text-[#e03e3e]/50" />
+              <p>No hay evaluaciones</p>
+              <p className="text-xs mt-1">Crea una nueva para comenzar</p>
+            </div>
+          )}
         </div>
 
         <div className="p-4 border-t border-[#e3e2de] space-y-2">

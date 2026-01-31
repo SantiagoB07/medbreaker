@@ -16,14 +16,18 @@ export const search = query({
   args: { query: v.string() },
   handler: async (ctx, args) => {
     const allProcedures = await ctx.db.query("procedures").collect();
-    const searchLower = args.query.toLowerCase();
+    const searchTerms = args.query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
     
-    return allProcedures.filter(
-      (p) =>
-        p.name.toLowerCase().includes(searchLower) ||
-        p.nameEs.toLowerCase().includes(searchLower) ||
-        p.category.toLowerCase().includes(searchLower)
-    );
+    // Si no hay términos, retornar vacío
+    if (searchTerms.length === 0) {
+      return [];
+    }
+    
+    return allProcedures.filter((p) => {
+      const searchableText = `${p.name} ${p.nameEs} ${p.category}`.toLowerCase();
+      // Buscar si CUALQUIERA de los términos coincide
+      return searchTerms.some(term => searchableText.includes(term));
+    });
   },
 });
 

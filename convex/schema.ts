@@ -26,20 +26,30 @@ export default defineSchema({
     .index("by_category", ["category"])
     .index("by_createdBy", ["createdBy"]),
 
-  // Tabla de evaluaciones (para historial)
+  // Tabla de evaluaciones (historial completo)
   evaluations: defineTable({
-    type: v.string(), // "single" o "multi"
-    greenAgentRules: v.optional(v.string()),
+    // Configuración
+    type: v.string(), // "single" | "multi"
+    evaluationPrompt: v.string(),
     
-    // Rondas de conversación
+    // Config para single
+    maxTurns: v.optional(v.number()),
+    
+    // Config para multi-round
+    turnsPerRound: v.optional(v.number()),
+    totalRounds: v.optional(v.number()),
+    
+    // Rondas con estructura completa
     rounds: v.array(
       v.object({
         roundNumber: v.number(),
-        redStrategy: v.string(),
-        conversation: v.array(
+        systemPrompt: v.string(),
+        messages: v.array(
           v.object({
-            role: v.string(),
+            role: v.string(), // "red-agent" | "green-agent"
             content: v.string(),
+            turnNumber: v.number(),
+            timestamp: v.number(),
             toolCalls: v.optional(
               v.array(
                 v.object({
@@ -51,29 +61,43 @@ export default defineSchema({
             ),
           })
         ),
-        evaluation: v.optional(
-          v.object({
-            score: v.number(),
-            reasoning: v.string(),
-            winner: v.string(),
-          })
-        ),
+        tacticCounts: v.object({
+          emotional: v.number(),
+          legal: v.number(),
+          technical: v.number(),
+        }),
+        evaluation: v.object({
+          outcome: v.string(), // "total_success" | "partial_success" | "failure"
+          successScore: v.number(),
+          authorizationDecision: v.string(), // "approved" | "denied" | "pending" | "unclear"
+          keyVulnerabilities: v.array(v.string()),
+          effectiveTactics: v.array(v.string()),
+          summary: v.string(),
+          detailedAnalysis: v.string(),
+        }),
       })
     ),
     
-    // Cambios en la DB hechos por el agente
+    // Resultado final
+    bestScore: v.optional(v.number()),
+    scoreProgression: v.optional(v.array(v.number())),
+    
+    // Cambios en DB hechos por el Green Agent (tracking de vulnerabilidades)
     dbChanges: v.array(
       v.object({
-        action: v.string(), // "create", "update", "delete"
+        action: v.string(), // "create" | "update" | "delete"
         procedureId: v.optional(v.string()),
         procedureName: v.string(),
+        roundNumber: v.number(),
         timestamp: v.number(),
       })
     ),
     
-    finalScore: v.optional(v.number()),
-    status: v.string(), // "running", "completed", "failed"
+    // Estado
+    status: v.string(), // "running" | "completed" | "failed" | "cancelled"
     createdAt: v.number(),
     completedAt: v.optional(v.number()),
-  }).index("by_status", ["status"]),
+  })
+    .index("by_status", ["status"])
+    .index("by_createdAt", ["createdAt"]),
 });

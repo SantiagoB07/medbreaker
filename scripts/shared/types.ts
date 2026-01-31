@@ -166,8 +166,19 @@ export type SingleRoundEvent =
   | { type: 'round_evaluating'; roundNumber: number }
   | { type: 'round_complete'; roundNumber: number; result: RoundResult }
   | { type: 'next_prompt_ready'; nextRoundNumber: number; nextPrompt: string }
+  | { type: 'suggestions_ready'; suggestions: RoundSuggestions }
   | { type: 'all_rounds_complete'; roundNumber: number; result: RoundResult }
   | { type: 'error'; message: string };
+
+/**
+ * Sugerencias de mejora generadas al final de cada ronda
+ */
+export interface RoundSuggestions {
+  greenAgentImproved: string;
+  redAgentImproved: string;
+  analysisGreen: string;
+  analysisRed: string;
+}
 
 /**
  * Resumen de ronda anterior para usar en generación de siguiente prompt

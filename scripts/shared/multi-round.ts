@@ -1,7 +1,7 @@
 import { generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { createRedAgent } from './red-agent';
-import { createGreenAgent } from './green-agent';
+import { createGreenAgent, DbChangeTrackingContext } from './green-agent';
 import { generateRedAgentSystemPrompt } from './purple-agent';
 import type {
   Message,
@@ -136,19 +136,43 @@ IMPORTANTE: El nuevo prompt debe ser SIGNIFICATIVAMENTE DIFERENTE al anterior, n
 
 /**
  * Ejecuta una ronda individual de simulación (EXPORT para uso en API por ronda)
+ * @param systemPrompt - System prompt del Red Agent
+ * @param evaluationPrompt - Objetivo de evaluación
+ * @param turnsPerRound - Turnos por ronda
+ * @param roundNumber - Número de ronda
+ * @param greenAgentPromptOrRules - Prompt completo del Green Agent O reglas (opcional)
+ * @param onEvent - Callback para eventos
+ * @param shouldStop - Callback para verificar si cancelar
+ * @param convexUrl - URL de Convex para tools
+ * @param evaluationId - ID para tracking de cambios en DB
+ * @param isFullGreenPrompt - Si es true, greenAgentPromptOrRules es un prompt completo
  */
 export async function runSingleRound(
   systemPrompt: string,
   evaluationPrompt: string,
   turnsPerRound: number,
   roundNumber: number,
-  greenAgentRules?: string,
+  greenAgentPromptOrRules?: string,
   onEvent?: (event: MultiRoundEvent) => void,
   shouldStop?: () => boolean,
-  convexUrl?: string
+  convexUrl?: string,
+  evaluationId?: string, // Para tracking de cambios en DB
+  isFullGreenPrompt: boolean = false
 ): Promise<RoundResult> {
   const redAgent = createRedAgent({ systemPrompt });
-  const greenAgent = createGreenAgent(greenAgentRules, convexUrl);
+  
+  // Create tracking context if evaluationId is provided
+  const trackingContext: DbChangeTrackingContext | undefined = evaluationId 
+    ? { evaluationId, roundNumber } 
+    : undefined;
+  
+  // Create Green Agent with either full prompt or rules
+  const greenAgent = createGreenAgent(
+    greenAgentPromptOrRules, 
+    convexUrl, 
+    trackingContext,
+    isFullGreenPrompt
+  );
 
   const context: ConversationContext = {
     messages: [],

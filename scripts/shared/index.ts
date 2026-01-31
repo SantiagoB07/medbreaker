@@ -39,6 +39,7 @@ export type {
   MultiRoundEvent,
   SingleRoundEvent,
   PreviousRoundSummary,
+  RoundSuggestions,
 } from './types';
 
 // ============================================================
@@ -49,7 +50,10 @@ export {
   runQuickSimulation,
   evaluateConversation,
   generateRedAgentSystemPrompt,
+  generateImprovementSuggestions,
 } from './purple-agent';
+
+export type { PromptSuggestions, SuggestionInput } from './purple-agent';
 
 // ============================================================
 // 🔴 RED AGENT - Atacante
@@ -68,7 +72,10 @@ export {
   generateGreenAgentResponse,
   loadRules,
   createGreenAgentSystemPrompt,
+  getDefaultGreenAgentPrompt,
 } from './green-agent';
+
+export type { DbChangeTrackingContext } from './green-agent';
 
 // ============================================================
 // 🔄 MULTI-ROUND EVALUATION - Evaluación Iterativa

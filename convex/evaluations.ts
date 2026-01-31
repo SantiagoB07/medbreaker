@@ -39,13 +39,19 @@ export const getRecent = query({
 // Crear nueva evaluación
 export const create = mutation({
   args: {
-    type: v.string(),
-    greenAgentRules: v.optional(v.string()),
+    type: v.string(), // "single" | "multi"
+    evaluationPrompt: v.string(),
+    maxTurns: v.optional(v.number()), // Para single
+    turnsPerRound: v.optional(v.number()), // Para multi
+    totalRounds: v.optional(v.number()), // Para multi
   },
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("evaluations", {
       type: args.type,
-      greenAgentRules: args.greenAgentRules,
+      evaluationPrompt: args.evaluationPrompt,
+      maxTurns: args.maxTurns,
+      turnsPerRound: args.turnsPerRound,
+      totalRounds: args.totalRounds,
       rounds: [],
       dbChanges: [],
       status: "running",
@@ -61,11 +67,13 @@ export const addRound = mutation({
     id: v.id("evaluations"),
     round: v.object({
       roundNumber: v.number(),
-      redStrategy: v.string(),
-      conversation: v.array(
+      systemPrompt: v.string(),
+      messages: v.array(
         v.object({
-          role: v.string(),
+          role: v.string(), // "red-agent" | "green-agent"
           content: v.string(),
+          turnNumber: v.number(),
+          timestamp: v.number(),
           toolCalls: v.optional(
             v.array(
               v.object({
@@ -77,13 +85,20 @@ export const addRound = mutation({
           ),
         })
       ),
-      evaluation: v.optional(
-        v.object({
-          score: v.number(),
-          reasoning: v.string(),
-          winner: v.string(),
-        })
-      ),
+      tacticCounts: v.object({
+        emotional: v.number(),
+        legal: v.number(),
+        technical: v.number(),
+      }),
+      evaluation: v.object({
+        outcome: v.string(), // "total_success" | "partial_success" | "failure"
+        successScore: v.number(),
+        authorizationDecision: v.string(), // "approved" | "denied" | "pending" | "unclear"
+        keyVulnerabilities: v.array(v.string()),
+        effectiveTactics: v.array(v.string()),
+        summary: v.string(),
+        detailedAnalysis: v.string(),
+      }),
     }),
   },
   handler: async (ctx, args) => {
@@ -93,19 +108,29 @@ export const addRound = mutation({
     }
     
     const updatedRounds = [...evaluation.rounds, args.round];
-    await ctx.db.patch(args.id, { rounds: updatedRounds });
+    
+    // Calculate scoreProgression
+    const scoreProgression = updatedRounds.map((r) => r.evaluation.successScore);
+    const bestScore = Math.max(...scoreProgression);
+    
+    await ctx.db.patch(args.id, { 
+      rounds: updatedRounds,
+      scoreProgression,
+      bestScore,
+    });
     return args.id;
   },
 });
 
-// Registrar cambio en DB
+// Registrar cambio en DB (cuando Green Agent modifica la base de datos)
 export const addDbChange = mutation({
   args: {
     id: v.id("evaluations"),
     change: v.object({
-      action: v.string(),
+      action: v.string(), // "create" | "update" | "delete"
       procedureId: v.optional(v.string()),
       procedureName: v.string(),
+      roundNumber: v.number(),
       timestamp: v.number(),
     }),
   },
@@ -125,12 +150,16 @@ export const addDbChange = mutation({
 export const complete = mutation({
   args: {
     id: v.id("evaluations"),
-    finalScore: v.number(),
   },
   handler: async (ctx, args) => {
+    const evaluation = await ctx.db.get(args.id);
+    if (!evaluation) {
+      throw new Error("Evaluation not found");
+    }
+    
+    // bestScore and scoreProgression are already updated in addRound
     await ctx.db.patch(args.id, {
       status: "completed",
-      finalScore: args.finalScore,
       completedAt: Date.now(),
     });
     return args.id;
@@ -141,10 +170,25 @@ export const complete = mutation({
 export const fail = mutation({
   args: {
     id: v.id("evaluations"),
+    errorMessage: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.id, {
       status: "failed",
+      completedAt: Date.now(),
+    });
+    return args.id;
+  },
+});
+
+// Cancelar evaluación
+export const cancel = mutation({
+  args: {
+    id: v.id("evaluations"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      status: "cancelled",
       completedAt: Date.now(),
     });
     return args.id;

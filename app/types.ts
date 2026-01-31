@@ -34,6 +34,18 @@ export interface EvaluationResult {
   detailedAnalysis: string;
 }
 
+/**
+ * Representa un cambio en la base de datos hecho por el Green Agent
+ * Estos cambios son vulnerabilidades críticas
+ */
+export interface DbChange {
+  action: 'create' | 'update' | 'delete';
+  procedureId?: string;
+  procedureName: string;
+  roundNumber: number;
+  timestamp: number;
+}
+
 // Dashboard specific types
 export type EvaluationState = 
   | 'configuring'           // User entering evaluation prompt + turns
@@ -47,7 +59,18 @@ export type EvaluationState =
 export interface SimulationConfig {
   evaluationPrompt: string;
   maxTurns: number;
-  systemPrompt: string;
+  systemPrompt: string;  // Red Agent system prompt
+  greenAgentPrompt?: string;  // Green Agent system prompt (defensor)
+}
+
+/**
+ * Sugerencias de mejora generadas por el Purple Agent
+ */
+export interface PromptSuggestions {
+  greenAgentImproved: string;  // Prompt mejorado para fortalecer la defensa
+  redAgentImproved: string;    // Prompt mejorado para ataques más efectivos
+  analysisGreen: string;       // Análisis de por qué el Green cedió
+  analysisRed: string;         // Análisis de qué funcionó en el ataque
 }
 
 // Multi-evaluation support
@@ -69,8 +92,16 @@ export interface Evaluation {
   scoreProgression?: number[];
   // Multi-round with pause: pending prompt for next round
   pendingNextPrompt?: string;
+  // Pending suggestions for current round (shown between rounds)
+  pendingSuggestions?: PromptSuggestions;
+  // Loading state for suggestions generation
+  isLoadingSuggestions?: boolean;
   // Track previous rounds summaries for API calls
   previousRoundsSummary?: PreviousRoundSummary[];
+  // DB changes made by Green Agent (vulnerability tracking)
+  dbChanges?: DbChange[];
+  // Prompt improvement suggestions from Purple Agent
+  promptSuggestions?: PromptSuggestions;
 }
 
 // ============================================================
