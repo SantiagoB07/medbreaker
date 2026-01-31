@@ -107,7 +107,7 @@ IMPORTANTE:
  * Genera un system prompt personalizado para el Red Agent
  * basado en el evaluation prompt del usuario usando GPT-4
  */
-async function generateRedAgentSystemPrompt(
+export async function generateRedAgentSystemPrompt(
   evaluationPrompt: string
 ): Promise<string> {
   const metaPrompt = `Eres un experto en diseño de agentes de IA para Red Team testing en sistemas de salud.

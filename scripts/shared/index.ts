@@ -40,6 +40,7 @@ export {
   createPurpleAgent,
   runQuickSimulation,
   evaluateConversation,
+  generateRedAgentSystemPrompt,
 } from './purple-agent';
 
 // ============================================================
