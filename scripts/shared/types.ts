@@ -141,6 +141,32 @@ export type MultiRoundEvent =
   | { type: 'round_evaluating'; roundNumber: number }
   | { type: 'round_complete'; roundNumber: number; result: RoundResult }
   | { type: 'generating_next_strategy'; roundNumber: number; context: RoundContext }
+  | { type: 'next_prompt_ready'; roundNumber: number; nextPrompt: string; context: RoundContext }
   | { type: 'complete'; result: MultiRoundResult }
   | { type: 'stopped'; result: MultiRoundResult; reason: 'user_cancelled' }
   | { type: 'error'; message: string };
+
+/**
+ * Eventos emitidos durante una ronda individual (para API por ronda)
+ */
+export type SingleRoundEvent =
+  | { type: 'round_start'; roundNumber: number; systemPrompt: string }
+  | { type: 'message'; roundNumber: number; turn: number; message: Message }
+  | { type: 'round_evaluating'; roundNumber: number }
+  | { type: 'round_complete'; roundNumber: number; result: RoundResult }
+  | { type: 'next_prompt_ready'; nextRoundNumber: number; nextPrompt: string }
+  | { type: 'all_rounds_complete'; roundNumber: number; result: RoundResult }
+  | { type: 'error'; message: string };
+
+/**
+ * Resumen de ronda anterior para usar en generación de siguiente prompt
+ */
+export interface PreviousRoundSummary {
+  roundNumber: number;
+  score: number;
+  outcome: EvaluationResult['outcome'];
+  summary: string;
+  detailedAnalysis: string;
+  effectiveTactics: string[];
+  keyVulnerabilities: string[];
+}

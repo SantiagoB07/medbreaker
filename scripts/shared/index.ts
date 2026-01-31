@@ -37,6 +37,8 @@ export type {
   MultiRoundConfig,
   MultiRoundResult,
   MultiRoundEvent,
+  SingleRoundEvent,
+  PreviousRoundSummary,
 } from './types';
 
 // ============================================================
@@ -74,4 +76,8 @@ export {
 export {
   runMultiRoundEvaluation,
   createMultiRoundConfig,
+  // Funciones para evaluación por ronda individual (con pausa entre rondas)
+  runSingleRound,
+  generateImprovedSystemPrompt,
+  evaluateConversation as evaluateMultiRoundConversation,
 } from './multi-round';

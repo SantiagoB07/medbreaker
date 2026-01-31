@@ -1,8 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
+  /* Notion-like Light Mode Palette */
+  --background: #ffffff;
+  --foreground: #37352f;
+  
+  /* Surfaces */
+  --surface: #ffffff;
+  --surface-secondary: #f7f6f3;
+  --surface-hover: #efefef;
+  --surface-active: #e8e7e4;
+  
+  /* Text */
+  --text-primary: #37352f;
+  --text-secondary: #6b6b6b;
+  --text-muted: #9b9a97;
+  
+  /* Borders */
+  --border: #e3e2de;
+  --border-strong: #d3d2cf;
+  
+  /* Accent Colors - Subtle, Notion-style */
+  --accent: #2383e2;
+  --accent-hover: #1a6bc4;
+  --success: #0f7b6c;
+  --success-bg: #dbeddb;
+  --warning: #d9730d;
+  --warning-bg: #fdecc8;
+  --danger: #e03e3e;
+  --danger-bg: #ffe2dd;
+  
+  /* Agent Colors */
+  --red-agent: #e03e3e;
+  --red-agent-bg: #ffe2dd;
+  --green-agent: #0f7b6c;
+  --green-agent-bg: #dbeddb;
+  --purple-agent: #9065b0;
+  --purple-agent-bg: #e8deee;
 }
 
 @theme inline {
@@ -15,12 +49,15 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar for chat and sidebar */
+/* Custom scrollbar - subtle */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -28,43 +65,48 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border-radius: 3px;
+  background: var(--border);
+  border-radius: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--border-strong);
 }
 
-/* Sidebar hover effects */
-aside .sidebar-item {
-  transition: background-color 0.15s ease;
+/* Smooth transitions */
+.transition-colors {
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
 }
 
-/* Prevent text selection on sidebar items */
-aside > div > div {
+.transition-all {
+  transition: all 0.15s ease;
+}
+
+/* Focus states */
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: rgba(35, 131, 226, 0.2);
+}
+
+/* Prevent text selection on interactive elements */
+button, 
+[role="button"] {
   user-select: none;
 }
 
-/* Smooth transitions for state changes */
-.transition-all {
-  transition-property: all;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 200ms;
+/* Score bar animation */
+@keyframes score-fill {
+  from { height: 0%; }
+  to { height: var(--score-height); }
 }
 
-/* Active evaluation indicator */
-.active-indicator {
-  position: relative;
-}
-
-.active-indicator::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: linear-gradient(to bottom, #a855f7, #ef4444);
-  border-radius: 0 2px 2px 0;
+.score-bar {
+  animation: score-fill 0.5s ease-out forwards;
 }

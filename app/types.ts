@@ -26,12 +26,13 @@ export interface EvaluationResult {
 
 // Dashboard specific types
 export type EvaluationState = 
-  | 'configuring'    // User entering evaluation prompt + turns
-  | 'generating'     // Generating Red Agent strategy
-  | 'preview'        // Showing strategy, user can edit
-  | 'simulating'     // Running simulation
-  | 'evaluating'     // Purple Agent evaluating
-  | 'results';       // Showing final results
+  | 'configuring'           // User entering evaluation prompt + turns
+  | 'generating'            // Generating Red Agent strategy
+  | 'preview'               // Showing strategy, user can edit
+  | 'simulating'            // Running simulation
+  | 'evaluating'            // Purple Agent evaluating
+  | 'waiting_for_continue'  // Multi-round: waiting for user to review/edit prompt and continue
+  | 'results';              // Showing final results
 
 export interface SimulationConfig {
   evaluationPrompt: string;
@@ -56,6 +57,10 @@ export interface Evaluation {
   rounds?: RoundResult[];
   currentRound?: number;
   scoreProgression?: number[];
+  // Multi-round with pause: pending prompt for next round
+  pendingNextPrompt?: string;
+  // Track previous rounds summaries for API calls
+  previousRoundsSummary?: PreviousRoundSummary[];
 }
 
 // ============================================================
@@ -73,6 +78,19 @@ export interface RoundResult {
   messages: Message[];
   tacticCounts: TacticCounts;
   evaluation: EvaluationResult;
+}
+
+/**
+ * Resumen de ronda anterior para usar en generación de siguiente prompt
+ */
+export interface PreviousRoundSummary {
+  roundNumber: number;
+  score: number;
+  outcome: EvaluationResult['outcome'];
+  summary: string;
+  detailedAnalysis: string;
+  effectiveTactics: string[];
+  keyVulnerabilities: string[];
 }
 
 export type MultiRoundState = 
