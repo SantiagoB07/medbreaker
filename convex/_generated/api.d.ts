@@ -9,6 +9,11 @@
  */
 
 import type * as evaluations from "../evaluations.js";
+import type * as http from "../http.js";
+import type * as kapsoWebhook from "../kapsoWebhook.js";
+import type * as kapsoWebhookAction from "../kapsoWebhookAction.js";
+import type * as messages from "../messages.js";
+import type * as patients from "../patients.js";
 import type * as procedures from "../procedures.js";
 
 import type {
@@ -19,6 +24,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   evaluations: typeof evaluations;
+  http: typeof http;
+  kapsoWebhook: typeof kapsoWebhook;
+  kapsoWebhookAction: typeof kapsoWebhookAction;
+  messages: typeof messages;
+  patients: typeof patients;
   procedures: typeof procedures;
 }>;
 

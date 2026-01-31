@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { 
   Play, 
   Square, 
@@ -33,6 +34,8 @@ import {
   Pencil,
   Copy,
   Lightbulb,
+  Users,
+  Menu,
 } from 'lucide-react';
 import type { 
   Evaluation, 
@@ -236,6 +239,7 @@ export default function Dashboard() {
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [suggestionTab, setSuggestionTab] = useState<'green' | 'red'>('green');
+  const [showMenu, setShowMenu] = useState(false);
   
   // Refs for chat auto-scroll and abort controllers
   const chatRef = useRef<HTMLDivElement>(null);
@@ -947,7 +951,7 @@ export default function Dashboard() {
           </div>
           <h2 className="text-2xl font-semibold text-[#37352f] mb-2">MedBreaker</h2>
           <p className="text-[#6b6b6b] mb-6">Red Team Security Testing for Medical AI</p>
-          <div className="flex gap-4">
+          <div className="flex gap-4 mb-6">
             <button
               onClick={() => handleCreateEvaluation(false)}
               className="px-6 py-3 bg-[#2383e2] hover:bg-[#1a6bc4] text-white rounded-lg font-medium transition-all"
@@ -961,6 +965,12 @@ export default function Dashboard() {
               <RefreshCw className="w-4 h-4" /> Evaluación Multi-Ronda
             </button>
           </div>
+          <Link
+            href="/patients"
+            className="px-6 py-3 bg-[#0f7b6c] hover:bg-[#0a5e52] text-white rounded-lg font-medium transition-all flex items-center gap-2"
+          >
+            <Users className="w-4 h-4" /> Ver Pacientes
+          </Link>
         </div>
       );
     }
@@ -2575,12 +2585,69 @@ export default function Dashboard() {
     <div className="h-screen flex bg-[#f7f6f3]">
       {/* Sidebar */}
       <aside className="w-80 border-r border-[#e3e2de] flex flex-col bg-white">
-        <div className="p-4 border-b border-[#e3e2de]">
-          <h1 className="text-xl font-bold">
-            <span className="text-[#e03e3e]">Med</span>
-            <span className="text-[#37352f]">Breaker</span>
-          </h1>
-          <p className="text-xs text-[#9b9a97] mt-1">Red Team Security Testing</p>
+        <div className="p-4 border-b border-[#e3e2de] flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold">
+              <span className="text-[#e03e3e]">Med</span>
+              <span className="text-[#37352f]">Breaker</span>
+            </h1>
+            <p className="text-xs text-[#9b9a97] mt-1">Red Team Security Testing</p>
+          </div>
+          
+          {/* Hamburger Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-2 hover:bg-[#f7f6f3] rounded-lg transition-colors"
+              title="Menú"
+            >
+              <Menu className="w-5 h-5 text-[#6b6b6b]" />
+            </button>
+            
+            {/* Dropdown Menu */}
+            {showMenu && (
+              <>
+                {/* Backdrop to close menu */}
+                <div 
+                  className="fixed inset-0 z-10" 
+                  onClick={() => setShowMenu(false)}
+                />
+                
+                {/* Menu Content */}
+                <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-[#e3e2de] z-20 py-1">
+                  <Link
+                    href="/patients"
+                    onClick={() => setShowMenu(false)}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f7f6f3] transition-colors text-[#37352f]"
+                  >
+                    <Users className="w-4 h-4 text-[#0f7b6c]" />
+                    <span>Pacientes</span>
+                  </Link>
+                  <div className="border-t border-[#e3e2de] my-1" />
+                  <button
+                    onClick={() => {
+                      handleCreateEvaluation(false);
+                      setShowMenu(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#f7f6f3] transition-colors text-[#37352f]"
+                  >
+                    <Plus className="w-4 h-4 text-[#2383e2]" />
+                    <span>Nueva Evaluación</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCreateEvaluation(true);
+                      setShowMenu(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#f7f6f3] transition-colors text-[#37352f]"
+                  >
+                    <RefreshCw className="w-4 h-4 text-[#9065b0]" />
+                    <span>Multi-Ronda</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">

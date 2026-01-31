@@ -100,4 +100,53 @@ export default defineSchema({
   })
     .index("by_status", ["status"])
     .index("by_createdAt", ["createdAt"]),
+
+  // Tabla de pacientes registrados via WhatsApp
+  patients: defineTable({
+    // Identificación
+    cedula: v.string(), // Documento de identidad (obligatorio)
+    phoneNumber: v.string(), // Número de WhatsApp
+    name: v.optional(v.string()), // Nombre del paciente (si lo proporciona)
+    
+    // Solicitud de procedimiento
+    requestedProcedure: v.string(), // Procedimiento solicitado
+    procedureId: v.optional(v.id("procedures")), // Referencia al procedimiento en DB
+    
+    // Evaluación de requisitos
+    meetsRequirements: v.boolean(), // Si cumple los requisitos
+    requirementDetails: v.optional(v.string()), // Detalles de por qué sí/no cumple
+    
+    // Estado de la solicitud
+    status: v.string(), // "pending" | "approved" | "denied" | "info_needed"
+    
+    // Historial de conversación (resumen)
+    conversationSummary: v.optional(v.string()),
+    
+    // Metadata
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_cedula", ["cedula"])
+    .index("by_phoneNumber", ["phoneNumber"])
+    .index("by_status", ["status"])
+    .index("by_createdAt", ["createdAt"]),
+
+  // Tabla de mensajes de conversación de WhatsApp
+  conversationMessages: defineTable({
+    phoneNumber: v.string(), // Número de WhatsApp
+    role: v.string(), // "user" | "agent"
+    content: v.string(), // Contenido del mensaje
+    turnNumber: v.number(), // Número de turno en la conversación
+    timestamp: v.number(), // Timestamp del mensaje
+    toolCalls: v.optional(
+      v.array(
+        v.object({
+          tool: v.string(),
+          args: v.any(),
+          result: v.any(),
+        })
+      )
+    ), // Tools usadas por el agente (opcional)
+  })
+    .index("by_phone_and_time", ["phoneNumber", "timestamp"]),
 });
