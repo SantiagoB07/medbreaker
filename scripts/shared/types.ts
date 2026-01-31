@@ -77,3 +77,70 @@ export interface RedAgentConfig {
     phase4: string;
   };
 }
+
+// ============================================================
+// MULTI-ROUND EVALUATION TYPES
+// ============================================================
+
+/**
+ * Resultado de una ronda individual en una evaluación multi-ronda
+ */
+export interface RoundResult {
+  roundNumber: number;
+  systemPrompt: string;
+  messages: Message[];
+  tacticCounts: TacticCounts;
+  evaluation: EvaluationResult;
+}
+
+/**
+ * Contexto pasado entre rondas para que Purple Agent mejore la estrategia
+ */
+export interface RoundContext {
+  roundNumber: number;
+  previousRounds: {
+    roundNumber: number;
+    score: number;
+    outcome: EvaluationResult['outcome'];
+    summary: string;
+    detailedAnalysis: string;
+    effectiveTactics: string[];
+    keyVulnerabilities: string[];
+  }[];
+}
+
+/**
+ * Configuración para evaluación multi-ronda
+ */
+export interface MultiRoundConfig {
+  evaluationPrompt: string;
+  totalRounds: number;
+  turnsPerRound: number;
+  greenAgentRules?: string;
+}
+
+/**
+ * Resultado completo de una evaluación multi-ronda
+ */
+export interface MultiRoundResult {
+  config: MultiRoundConfig;
+  rounds: RoundResult[];
+  bestRound: RoundResult;
+  worstRound: RoundResult;
+  scoreProgression: number[];
+  completed: boolean;
+  stoppedAtRound?: number;
+}
+
+/**
+ * Eventos emitidos durante una evaluación multi-ronda (para streaming)
+ */
+export type MultiRoundEvent =
+  | { type: 'round_start'; roundNumber: number; totalRounds: number; systemPrompt: string }
+  | { type: 'message'; roundNumber: number; turn: number; message: Message }
+  | { type: 'round_evaluating'; roundNumber: number }
+  | { type: 'round_complete'; roundNumber: number; result: RoundResult }
+  | { type: 'generating_next_strategy'; roundNumber: number; context: RoundContext }
+  | { type: 'complete'; result: MultiRoundResult }
+  | { type: 'stopped'; result: MultiRoundResult; reason: 'user_cancelled' }
+  | { type: 'error'; message: string };

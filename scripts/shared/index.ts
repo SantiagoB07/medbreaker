@@ -31,6 +31,12 @@ export type {
   EvaluationResult,
   SimulationResult,
   RedAgentConfig,
+  // Multi-round types
+  RoundResult,
+  RoundContext,
+  MultiRoundConfig,
+  MultiRoundResult,
+  MultiRoundEvent,
 } from './types';
 
 // ============================================================
@@ -61,3 +67,11 @@ export {
   loadRules,
   createGreenAgentSystemPrompt,
 } from './green-agent';
+
+// ============================================================
+// 🔄 MULTI-ROUND EVALUATION - Evaluación Iterativa
+// ============================================================
+export {
+  runMultiRoundEvaluation,
+  createMultiRoundConfig,
+} from './multi-round';

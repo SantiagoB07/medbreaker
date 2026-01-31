@@ -18,21 +18,53 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
-/* Custom scrollbar for chat */
+/* Custom scrollbar for chat and sidebar */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: #27272a;
-  border-radius: 4px;
+  background: transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #52525b;
-  border-radius: 4px;
+  background: #3f3f46;
+  border-radius: 3px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #71717a;
+  background: #52525b;
+}
+
+/* Sidebar hover effects */
+aside .sidebar-item {
+  transition: background-color 0.15s ease;
+}
+
+/* Prevent text selection on sidebar items */
+aside > div > div {
+  user-select: none;
+}
+
+/* Smooth transitions for state changes */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+/* Active evaluation indicator */
+.active-indicator {
+  position: relative;
+}
+
+.active-indicator::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(to bottom, #a855f7, #ef4444);
+  border-radius: 0 2px 2px 0;
 }

@@ -25,8 +25,7 @@ export interface EvaluationResult {
 }
 
 // Dashboard specific types
-export type DashboardState = 
-  | 'idle'           // Initial state - show "Create Eval" button
+export type EvaluationState = 
   | 'configuring'    // User entering evaluation prompt + turns
   | 'generating'     // Generating Red Agent strategy
   | 'preview'        // Showing strategy, user can edit
@@ -39,3 +38,45 @@ export interface SimulationConfig {
   maxTurns: number;
   systemPrompt: string;
 }
+
+// Multi-evaluation support
+export interface Evaluation {
+  id: string;
+  state: EvaluationState;
+  config: SimulationConfig;
+  messages: Message[];
+  currentTurn: number;
+  evaluation: EvaluationResult | null;
+  tacticCounts: TacticCounts | null;
+  error: string | null;
+  createdAt: Date;
+  // Multi-round support
+  isMultiRound: boolean;
+  multiRoundConfig?: MultiRoundConfig;
+  rounds?: RoundResult[];
+  currentRound?: number;
+  scoreProgression?: number[];
+}
+
+// ============================================================
+// MULTI-ROUND TYPES
+// ============================================================
+
+export interface MultiRoundConfig {
+  totalRounds: number;
+  turnsPerRound: number;
+}
+
+export interface RoundResult {
+  roundNumber: number;
+  systemPrompt: string;
+  messages: Message[];
+  tacticCounts: TacticCounts;
+  evaluation: EvaluationResult;
+}
+
+export type MultiRoundState = 
+  | 'configuring'
+  | 'running'           // Multi-round in progress
+  | 'between_rounds'    // Generating next strategy
+  | 'results';
