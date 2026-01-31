@@ -61,6 +61,7 @@ export interface SimulationResult {
   totalTurns: number;
   tacticCounts: TacticCounts;
   evaluation: EvaluationResult;
+  redAgentSystemPrompt: string; // System prompt generado para el Red Agent
 }
 
 /**
