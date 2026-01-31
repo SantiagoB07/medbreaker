@@ -46,7 +46,12 @@ medbreaker/
 ├── rules/
 │   └── authorization-rules.md    # Reglas de autorización médica
 ├── scripts/
-│   └── agent.ts                  # Script del agente interactivo
+│   ├── agent.ts                  # Script del agente interactivo
+│   ├── simulation.ts             # Simulación Red Team vs Auth Agent
+│   └── shared/
+│       ├── types.ts              # Tipos TypeScript compartidos
+│       ├── auth-agent.ts         # Lógica del agente de autorización
+│       └── red-agent.ts          # Lógica del agente atacante
 ├── .env.local                    # Variables de entorno (API keys)
 └── README.md
 ```
